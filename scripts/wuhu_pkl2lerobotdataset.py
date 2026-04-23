@@ -8,7 +8,7 @@ from pathlib import Path
 from tqdm import tqdm
 from collections import defaultdict
 from transform_utils import convert_pose_mat2quat, convert_pose_quat2mat
-
+from PIL import Image
 
 LEROBOT_PATH = "/home/ywl/lerobot/src" 
 if LEROBOT_PATH not in sys.path:
@@ -26,8 +26,8 @@ except ImportError as e:
 TASK_NAME = "tactile_manipulation_test" 
 TASK_DESC = "robot manipulation with tactile and wrist camera feedback"
 
-PKL_DATA_DIR = "/home/ywl/test/test_data_pkl" 
-BASE_OUTPUT_DIR = "/home/ywl/test/test_data_lerobotdataset"
+PKL_DATA_DIR = "/home/ywl/simdata/pkl"
+BASE_OUTPUT_DIR = "/home/ywl/simdata/test_data_lerobotdataset"
 OUTPUT_DIR = os.path.join(BASE_OUTPUT_DIR, TASK_NAME)
 REPO_ID = f"user/{TASK_NAME}"
 
@@ -55,13 +55,32 @@ def calculate_relative_action(curr_state, next_state):
     return action.astype(np.float32)
 
 def safe_load_and_resize_image(path, target_size):
-    """安全读取图像并缩放。若路径无效则返回全黑占位图"""
+
     if path and os.path.exists(path):
-        img = cv2.imread(path)
-        if img is not None:
-            return cv2.resize(img, target_size)
+
+        try:
+            img_array = np.fromfile(path, dtype=np.uint8)
+            img_bgr = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+        except Exception as e:
+            img_bgr = None
+            print(f"读取图像异常 {path}: {e}")
+
+        if img_bgr is not None:
+            img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
             
-    return np.zeros((target_size[1], target_size[0], 3), dtype=np.uint8)
+            h, w = img_rgb.shape[:2]
+            short_edge = min(h, w)
+            
+            start_x = (w - short_edge) // 2
+            start_y = (h - short_edge) // 2
+            
+            img_cropped = img_rgb[start_y:start_y+short_edge, start_x:start_x+short_edge]
+            
+            img_resized = cv2.resize(img_cropped, target_size)
+            return Image.fromarray(img_resized)
+            
+    # 若路径无效或读取失败，返回对应尺寸的全黑 PIL 图像
+    return Image.fromarray(np.zeros((target_size[1], target_size[0], 3), dtype=np.uint8))
 
 def get_feature_config():
     h_wrist, w_wrist = RESIZE_WRIST[1], RESIZE_WRIST[0]
