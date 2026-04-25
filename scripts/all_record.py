@@ -25,10 +25,13 @@ try:
 except ImportError:
     raise ImportError("无法导入 gelSight_SDK, 请检查系统路径是否存在。")
 
+
+
+
 class GelSightManager:
     def __init__(self, 
                  dev1_id="GelSight Mini R0B 2DPF-C3HB:", 
-                 dev2_id="GelSight Mini R0B 2DAT-2LMZ"):
+                 dev2_id="GelSight Mini R0B 2DMA-NFYZ"):
         self.dev1 = gsdevice.Camera(dev1_id)
         self.dev2 = gsdevice.Camera(dev2_id)
         self.dev1.connect()
@@ -334,14 +337,43 @@ def process_gripper_states(umi_file, gripper_file, output_file):
     
     np.savetxt(output_file, result, fmt='%.6f %d')
 
-
+def unify_quaternion_sign(file_path):
+    """
+    读取位姿文件，统一所有四元数的实部 w 为正。
+    如果 w < 0，则将整个四元数 (qx, qy, qz, qw) 取反。
+    """
+    try:
+        # 加载数据 (timestamp, x, y, z, qx, qy, qz, qw)
+        data = np.loadtxt(file_path)
+        if data.size == 0:
+            return
+        
+        # 假设 qw 是最后一列 (索引 7)
+        # 提取四元数部分
+        quats = data[:, 4:8]
+        
+        # 找到所有实部 qw < 0 的行
+        # quats[:, 3] 对应 qw
+        neg_indices = quats[:, 3] < 0
+        
+        # 对这些行进行取反操作 (q 和 -q 等价)
+        quats[neg_indices] *= -1
+        
+        # 写回原数组
+        data[:, 4:8] = quats
+        
+        # 覆盖保存
+        np.savetxt(file_path, data, fmt='%.18f')
+        print(f" 已统一四元数实部为正: {file_path}")
+    except Exception as e:
+        print(f" 统一四元数时发生错误: {e}")
 
 
 
 def main():
     import pathlib
 
-    base_dir = pathlib.Path("/home/k202/0421")
+    base_dir = pathlib.Path("/home/k202/test")
     next_num = max([int(f.name) for f in base_dir.glob('*') if f.name.isdigit()] + [-1]) + 1
     base_dir = base_dir / f"{next_num:06d}"
     base_dir.mkdir(parents=True, exist_ok=True)
@@ -359,7 +391,7 @@ def main():
     print("正在初始化硬件与 ROS 节点...")
     
     tac_manager = GelSightManager()
-    gopro_manager = GoproManager(device_id=10, width=1080, height=720, fps=30)
+    gopro_manager = GoproManager(device_id=10, width=224, height=224, fps=30)
     serial_manager = SerialManager(port='/dev/ttyUSB0', baud_rate=115200, save_dir=base_dir)
     pose_manager = PoseManager(save_dir=base_dir)
     # force_manager = ForceTorqueManager(topic_name="/force_sensor/wrench", save_dir=base_dir)
@@ -429,7 +461,9 @@ def main():
             umi_file_path = os.path.join(base_dir, 'umi_body_abs.txt')
             gripper_file_path = os.path.join(base_dir, 'gripper_state.txt')
             output_file_path = os.path.join(base_dir, 'gripper_state_time.txt')
-               
+
+            unify_quaternion_sign(umi_file_path) 
+              
             print(" 正在执行夹爪状态与机械臂位姿匹配...")
             process_gripper_states(umi_file_path, gripper_file_path, output_file_path)
             
